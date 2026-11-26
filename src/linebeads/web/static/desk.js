@@ -5,8 +5,8 @@ const code = document.body.dataset.endpoint;
 const endpoint = `/api/${code}`;
 const nav = [...document.querySelectorAll('[data-stage]')];
 let currentBatch = null;
-const order = {key:'单号',zone:'作业区',estimate:'估计',interval:'估计区间',state:'处置',cost:'用量',reason:'原因码',evidence:'处理依据',drivers:'主要影响项',missing:'缺测量',hits:'命中规则'};
-const visibleOrder = ['key','zone','estimate','state','cost'];
+const order = {key:'单号',zone:'作业区',latest_retest_day:'最迟复测日',scheduled_day:'实排日',schedule_state:'排班状态',estimate:'估计',interval:'估计区间',state:'处置',cost:'用量',reason:'原因码',evidence:'处理依据',drivers:'主要影响项',missing:'缺测量',hits:'命中规则'};
+const visibleOrder = ['key','zone','latest_retest_day','scheduled_day','state','cost'];
 let ledger;
 let focus = 6;
 let currentItem;
@@ -128,6 +128,13 @@ function showDetail() {
             if (ticket) inspect(ticket);
         }});
         card.append(plan);
+    }
+    if (panel.future_schedule_rows?.length) {
+        card.append(node('h3','未来数日巡检','inner-heading'));
+        showTables(card,panel.future_schedule_rows,{linkKey:'单号',choose: record => {
+            const ticket = ledger.rows.find(item => item.key === record['单号']);
+            if (ticket) inspect(ticket);
+        }});
     }
     showTables(card,panel.records);
     if (panel.errors.length > 0) {

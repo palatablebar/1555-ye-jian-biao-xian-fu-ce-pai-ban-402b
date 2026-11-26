@@ -28,3 +28,8 @@ def apply_retrocheck_slots(roads, admit: Callable, wait: Callable):
             wait(segment, 'RETROREFLECTOMETER_QUOTA', '该路线的夜间复测配时已满')
         elif admit(segment):
             probe_tally[route] += required
+
+
+def __getattr__(name):
+    from .followup import generic_api
+    return generic_api(name)

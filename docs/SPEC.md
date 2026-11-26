@@ -60,6 +60,20 @@
 
 第一条为暂停规则。其余命中与模型阈值 `25` 共同决定是否列入候选。单据所需工位数按 `1 + int(traffic_k >= 38)` 计算。均衡策略对分区限额，集中复核策略允许把额度集中投入高风险区。未分派原因在导出的处置记录中保留。签发前核对每张当班单和工位余额。
 
-### 标线干面对照单
+### 未来数日巡检
+
+未来排班使用同一套冻结特征和模型投影超线日，禁止在排班模块另写一套特征。核心入口为
+`linebeads.retrocheck_slots.followup.schedule_followups(orders, daily_capacity=..., start_day=..., horizon=...)`，
+HTTP 入口为 `POST /api/linebeads/schedule`。
+
+- `latest_retest_day` / `最迟复测日`：预测衰减首次达到阈值的工日，超线当日允许复测。
+- `scheduled_day` / `实排日`：实际排入的工日。
+- 未超线回执的覆盖终点就是回执当日；不得据此推断之后仍然安全。
+- 到站晚于回放关窗日的版次对该次回放不可见；`select_version(records, as_of)` 与 `load_samples(..., as_of)` 均按此时点规则取版。
+- 回放比较 `count_misses(current, actual_crossings)` 与 `count_misses(delayed, actual_crossings)`；延后方案的漏查数不得高于现行排班。
+- 在该约束内把工位向后推，最小化 `first_day_used`。每日容量不足时按最迟日升序（EDF）保留更早期限；无法排入期限的单据置为 `逾期风险` / `OVERDUE_RISK`。
+- 拟承诺日超出回放覆盖范围的单据不自动承诺，置为 `人工判读` / `MANUAL_REVIEW`。
+
+## 标线干面对照单
 
 同路段、近龄期且留有完整实测值的干面点可以做对照。潮湿测点先保留读数，低反光、少投珠和车流高的复测安排分别记录。 在派发环节展开现场安排，或从关联单据回查实际读数。

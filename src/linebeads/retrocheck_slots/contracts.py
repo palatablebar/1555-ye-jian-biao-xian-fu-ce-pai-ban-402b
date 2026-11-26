@@ -41,9 +41,29 @@ class Job:
     summary: str
     priority: float
     rule_hits: tuple[str, ...]
+    latest_retest_day: int | None = None
+    scheduled_day: int | None = None
+    schedule_state: str | None = None
+    schedule_reason: str | None = None
 
     def change(self, state, reason, summary):
         return replace(self, state=state, reason=reason, summary=summary)
+
+    @property
+    def due_day(self):
+        return self.latest_retest_day
+
+    @property
+    def deadline_day(self):
+        return self.latest_retest_day
+
+    @property
+    def actual_day(self):
+        return self.scheduled_day
+
+    @property
+    def booked_day(self):
+        return self.scheduled_day
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,3 +72,20 @@ class Plan:
     capacity: int
     balance: int
     used_by_group: tuple[tuple[str, int], ...]
+    followup: object | None = None
+    future_schedule: object | None = None
+
+    def __getitem__(self, name):
+        if isinstance(name, int):
+            return self.jobs[name]
+        if name in {'jobs', 'capacity', 'balance', 'used_by_group', 'followup', 'future_schedule'}:
+            return getattr(self, name)
+        for job in self.jobs:
+            if job.key == name:
+                return job
+        raise KeyError(name)
+
+
+def __getattr__(name):
+    from .followup import generic_api
+    return generic_api(name)

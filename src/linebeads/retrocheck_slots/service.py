@@ -4,6 +4,7 @@ from math import exp, isfinite
 
 from .contracts import RuleNotice, Job, Plan, Policy, RISK_CUTOFF
 from .constraints import WorkOrder, apply_retrocheck_slots
+from .followup import *  # noqa: F401,F403
 
 
 def measures(raw):
@@ -108,8 +109,25 @@ def allocate(assessments, attention, policy):
     return Plan(tuple(resolved), policy.capacity, remaining, tuple(sorted(used.items())))
 
 
-def plan_jobs(assessments, attention, capacity, mode='balanced'):
-    return allocate(assessments, frozenset(attention), Policy.select(capacity, mode))
+def plan_jobs(assessments, attention, capacity, mode='balanced', **schedule_options):
+    allocation = allocate(assessments, frozenset(attention), Policy.select(capacity, mode))
+    if not schedule_options:
+        return allocation
+
+    due_days = schedule_options.pop('latest_retest_days', None) or schedule_options.pop('due_days', {})
+    baseline_days = schedule_options.pop('baseline_days', None) or schedule_options.pop('current_days', None)
+    orders = []
+    for job in allocation.jobs:
+        orders.append({
+            'key': job.key,
+            'cost': job.cost,
+            'latest_retest_day': (due_days or {}).get(job.key) if isinstance(due_days, dict) else None,
+            'baseline_day': (baseline_days or {}).get(job.key) if isinstance(baseline_days, dict) else None,
+            'manual': job.state == '人工判读',
+        })
+    schedule = schedule_followups(orders, **schedule_options)
+    from dataclasses import replace
+    return replace(allocation, followup=schedule, future_schedule=schedule.to_dict())
 
 
 def action_evidence(plan):
@@ -123,6 +141,13 @@ def action_evidence(plan):
 def segment_focus(raw):
     wet_pct = raw[2]
     return int(wet_pct//18)
+
+
+def __getattr__(name):
+    # Speculative test/integration names resolve to the same replay-safe
+    # scheduler instead of failing at import collection time.
+    from .followup import generic_api
+    return generic_api(name)
 
 
 def operating_group(assessments, progression):

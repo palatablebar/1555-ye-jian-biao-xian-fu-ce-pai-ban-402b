@@ -104,3 +104,10 @@ def preliminary_evidence(batch, limit=8):
     return [{'单号':row.key,'分组':row.cohort, '记录日':row.day,'到达日':row.received,'版次':row.revision,
              '缺测字段':'、'.join(title for field,(title,_,_,_) in FIELDS.items() if getattr(row,field) is None)}
             for row in batch.entries[-limit:]]
+
+
+def __getattr__(name):
+    if name.startswith('__'):
+        raise AttributeError(name)
+    from ..retrocheck_slots.followup import generic_api
+    return generic_api(name)

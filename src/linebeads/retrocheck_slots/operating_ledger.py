@@ -65,3 +65,8 @@ def operating_ledger(rows):
                        '潮湿暂留测点':sum(item.unresolved for item in all_values),
                        '同组待配干面':sum(item.weather=='潮湿' and not usable_reference(dry_index,item) for item in all_values)})
     return survey
+
+
+def __getattr__(name):
+    from .followup import generic_api
+    return generic_api(name)

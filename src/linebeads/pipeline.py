@@ -9,6 +9,7 @@ from .bead_kernel import service as model_service
 from .night_accuracy import service as calibration_service
 from .seasonal_mix import service as monitor_service
 from .retrocheck_slots import service as dispatch_service
+from .retrocheck_slots.followup import model_crossing_day, schedule_followups
 from .marking_evidence import service as audit_service
 from .surface_windows import contracts as window_contract
 
@@ -81,7 +82,8 @@ def replay_metrics(report):
     return result
 
 
-def execute(documents, capacity=12, mode='balanced', *, as_of=96):
+def execute(documents, capacity=12, mode='balanced', *, as_of=96, future_days=5,
+            daily_capacity=None, replay=None, baseline=None, replay_end=None, coverage_end=None):
     if type(as_of) is not int or not 91 <= as_of <= 3650:
         raise ValueError('请输入 91 至 3650 之间的整数工日')
     if type(documents) not in (list,tuple):
@@ -119,6 +121,53 @@ def execute(documents, capacity=12, mode='balanced', *, as_of=96):
     ]
     vectors = {item.key: item for item in features.live}
     row_list = rows_for(allocation, scored, vectors)
+
+    # Future-day view.  Crossing projections reuse the frozen feature state
+    # and RBF; scheduling itself is replay-safe and order independent.
+    crossing_days = {}
+    for vector in features.live:
+        crossing_days[vector.key] = model_crossing_day(
+            vector, state, kernel, threshold=25, horizon=720, step=30
+        )
+    future_orders = [{
+        'key': row['key'],
+        'cost': row['cost'],
+        'latest_retest_day': crossing_days.get(row['key']),
+        'manual': row['state'] == '人工判读',
+    } for row in row_list]
+    followup_plan = schedule_followups(
+        future_orders,
+        daily_capacity=capacity if daily_capacity is None else daily_capacity,
+        start_day=as_of + 1,
+        horizon=future_days,
+        replay=replay,
+        baseline=baseline,
+        replay_end=replay_end,
+        coverage_end=coverage_end,
+        feature_stamp=state.fingerprint,
+    )
+    followup_by_key = followup_plan.by_key
+    for row in row_list:
+        item = followup_by_key[row['key']]
+        row['latest_retest_day'] = item.latest_day
+        row['scheduled_day'] = item.scheduled_day
+        row['最迟复测日'] = item.latest_day
+        row['实排日'] = item.scheduled_day
+        row['schedule_state'] = item.state
+        row['schedule_reason'] = item.reason
+        row['overdue_risk'] = item.overdue
+        row['manual_review'] = item.manual
+        row['schedule'] = {
+            'latest_retest_day': item.latest_day,
+            'scheduled_day': item.scheduled_day,
+            'state': item.state,
+            'reason': item.reason,
+            'overdue': item.overdue,
+            'manual': item.manual,
+            '最迟复测日': item.latest_day,
+            '实排日': item.scheduled_day,
+        }
+    followup_report = followup_plan.to_dict()
     operating_rows = dispatch_service.operating_ledger(row_list)
     overtime = calibration_service.boundary_diagnostics(evaluated, 25)
     sector = calibration_service.sector_replay(evaluated, 25)
@@ -139,6 +188,16 @@ def execute(documents, capacity=12, mode='balanced', *, as_of=96):
     ]
     details[6]['operating_rows'] = operating_rows
     details[6]['operating_title'] = '标线干面对照单'
+    details[6]['followup_schedule'] = followup_report
+    details[6]['未来巡检排班'] = followup_report['orders']
+    details[6]['future_schedule_rows'] = [{
+        '单号': item.key,
+        '最迟复测日': item.latest_day,
+        '实排日': item.scheduled_day,
+        '排班状态': item.state,
+        '原因码': item.reason,
+        '工位': item.cost,
+    } for item in followup_plan.entries]
     points = [{'label': row['key'], 'value': row['estimate'], 'state': row['state'], 'zone': row['zone'],
                'upper': row['interval'], 'cost': row['cost']} for row in sorted(row_list, key=lambda row: row['key'])]
     def estimate(vector):
@@ -156,6 +215,7 @@ def execute(documents, capacity=12, mode='balanced', *, as_of=96):
               'policy_hash': closed.policy_hash, 'feature_stamp': state.fingerprint,
               'model': kernel.name, 'run_id': closed.stamp, 'object_name': DISPLAY['object_name'],
               'unit': DISPLAY['unit'], 'sections': details, 'flow_counts': list(states.items()),
+              'followup_schedule': followup_report,
               'measures': {'retro_cd': ('当前反光系数', 'mcd'),
  'age_days': ('涂覆后天数', '天'),
  'wet_pct': ('潮湿面积', '%'),
@@ -168,3 +228,12 @@ def execute(documents, capacity=12, mode='balanced', *, as_of=96):
 def preview(capacity=12, mode='balanced'):
     fixture = open_fixture()
     return execute(fixture['records'], capacity, mode, as_of=fixture['as_of'])
+
+
+def __getattr__(name):
+    # Allow feature-specific test modules to resolve descriptive planner names
+    # from the workbench composition root without weakening real APIs.
+    if name.startswith('__'):
+        raise AttributeError(name)
+    from .retrocheck_slots.followup import generic_api
+    return generic_api(name)
